@@ -1,0 +1,6 @@
+INFO:root:joel conectado desde ('192.168.100.13', 51124)
+INFO:root:franco conectado desde ('127.0.0.1', 64680)
+INFO:root:joel envió: hola
+INFO:root:franco envió: hola
+INFO:root:franco envió: @joel hola
+INFO:root:joel envió: @franco hola

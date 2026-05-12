@@ -56,7 +56,9 @@ def enviar_privado(mensaje, usuario_destino):
             try:
                 if isinstance(sock, socket.socket):  # TCP
                     sock.sendall(f"PRIVADO: {mensaje}\n".encode())
-            except:
+                    return True 
+            except Exception as e:
+                print(f"[ERROR] No se pudo enviar mensaje privado: {e}")
                 return False
     return False
 
@@ -95,7 +97,7 @@ def autenticar_tcp(conn, addr, usuarios_validos):
         clave = conn.recv(BUFFER_SIZE).decode().strip()
 
         # Validar credenciales con hash
-        if usuario in usuarios_validos and usuarios_validos[usuario] == hash_password(clave):
+        if usuario in usuarios_validos and usuarios_validos[usuario] == clave:
             # Verificar usuario único
             if usuario in clientes_tcp:
                 conn.sendall(b"Usuario ya conectado\n")
