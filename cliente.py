@@ -1,6 +1,7 @@
 import socket
 import threading
 import sys
+import hashlib
 
 # Configuración
 HOST = "127.0.0.1"  # Cambiar por IP del servidor
@@ -25,6 +26,9 @@ class ClienteChat:
                 print("\n[Error] Conexión TCP perdida")
                 break
 
+    def hash_password(self, password):
+        return hashlib.sha256(password.encode()).hexdigest()
+
     def cliente_tcp(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
@@ -39,7 +43,8 @@ class ClienteChat:
 
                 print(s.recv(BUFFER_SIZE).decode(), end='')
                 clave = input().strip()
-                s.sendall(clave.encode())
+                clave_hasheada = self.hash_password(clave)
+                s.sendall(clave_hasheada.encode())
 
                 respuesta = s.recv(BUFFER_SIZE).decode()
                 print(respuesta)
