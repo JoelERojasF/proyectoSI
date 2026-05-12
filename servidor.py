@@ -1,18 +1,31 @@
 import socket
 import threading
 import os
+from datetime import datetime
+import hashlib
+import logging
+
+# Configuración del log
+logging.basicConfig(filename="chat.log", level=logging.INFO)
 
 # Configuracion
 HOST = '0.0.0.0'
 TCP_PORT = 50000
-UDP_PORT = 50001
 BUFFER_SIZE = 1024
-MAX_CONEXIONES = 10
+MAX_CONEXIONES = 5
 
-# Estructuras para clientes
-clientes_tcp = []  # Lista de sockets TCP
-clientes_udp = []  # Lista de direcciones UDP
-usuarios_conectados = {}  # {addr: (usuario, socket_o_udp)}
+# Estructura para clientes
+clientes_tcp = {}  # {usuario: conn}
+usuarios_conectados = {}  # {addr: (usuario, conn)}
+
+
+def hash_password(password):
+    """Genera el hash SHA-256 de una contraseña"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def formatear_mensaje(usuario, mensaje):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return f"[{usuario}] {timestamp}: {mensaje}"
 
 def cargar_usuarios():
     """Carga usuarios desde el archivo usuarios.txt"""
@@ -27,23 +40,14 @@ def cargar_usuarios():
         print("[ERROR] Archivo usuarios.txt no encontrado")
     return usuarios
 
-def broadcast(mensaje, protocolo, origen=None):
-    """Envia un mensaje a todos los clientes del protocolo especificado"""
-    if protocolo == 'tcp':
-        for cliente in clientes_tcp[:]:
-            try:
-                if cliente != origen:
-                    cliente.sendall(f"SERVIDOR: {mensaje}\n".encode())
-            except:
-                clientes_tcp.remove(cliente)
-    elif protocolo == 'udp':
-        for addr in clientes_udp[:]:
-            try:
-                if addr != origen:
-                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                        s.sendto(f"SERVIDOR: {mensaje}\n".encode(), addr)
-            except:
-                clientes_udp.remove(addr)
+def broadcast(mensaje, origen=None):
+    """Envía un mensaje a todos los clientes TCP"""
+    for usuario, conn in list(clientes_tcp.items()):
+        try:
+            if conn != origen:
+                conn.sendall(f"SERVIDOR: {mensaje}\n".encode())
+        except:
+            del clientes_tcp[usuario]
 
 def enviar_privado(mensaje, usuario_destino):
     """Envia un mensaje privado a un usuario especifico"""
@@ -52,30 +56,23 @@ def enviar_privado(mensaje, usuario_destino):
             try:
                 if isinstance(sock, socket.socket):  # TCP
                     sock.sendall(f"PRIVADO: {mensaje}\n".encode())
-                else:  # UDP
-                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                        s.sendto(f"PRIVADO: {mensaje}\n".encode(), addr)
-                return True
             except:
                 return False
     return False
 
-def manejar_mensaje_tcp(mensaje, addr):
-    """Procesa mensajes TCP (publicos/privados)"""
-    usuario = usuarios_conectados.get(addr, ["Anonimo"])[0]
-    
-    if mensaje.startswith('@'):  # Mensaje privado
+def manejar_mensaje_tcp(mensaje, usuario, conn):
+    if mensaje.startswith('@'):
         partes = mensaje.split(maxsplit=1)
         if len(partes) > 1:
             destino, msg = partes
-            destino = destino[1:]  # Quitar @
-            if enviar_privado(f"{usuario} te dice: {msg}", destino):
+            destino = destino[1:]
+            if enviar_privado(formatear_mensaje(usuario, msg), destino):
                 print(f"[TCP] {usuario} -> {destino}: {msg}")
             else:
-                usuarios_conectados[addr][1].sendall(b"Usuario no encontrado\n")
-    else:  # Mensaje publico
+                conn.sendall(b"Usuario no encontrado\n")
+    else:
         print(f"[TCP] {usuario}: {mensaje}")
-        broadcast(f"{usuario}: {mensaje}", 'tcp', usuarios_conectados[addr][1])
+        broadcast(formatear_mensaje(usuario, mensaje), conn)
 
 def servidor_tcp(usuarios_validos):
     """Inicia el servidor TCP"""
@@ -97,82 +94,57 @@ def autenticar_tcp(conn, addr, usuarios_validos):
         conn.sendall(b"Clave: ")
         clave = conn.recv(BUFFER_SIZE).decode().strip()
 
-        if usuario in usuarios_validos and usuarios_validos[usuario] == clave:
+        # Validar credenciales con hash
+        if usuario in usuarios_validos and usuarios_validos[usuario] == hash_password(clave):
+            # Verificar usuario único
+            if usuario in clientes_tcp:
+                conn.sendall(b"Usuario ya conectado\n")
+                conn.close()
+                return
+
+            # Verificar límite de conexiones
+            if len(clientes_tcp) >= MAX_CONEXIONES:
+                conn.sendall(b"Servidor lleno\n")
+                conn.close()
+                return
+
+            # Autenticación exitosa
             conn.sendall(b"Autenticado correctamente\n")
-            clientes_tcp.append(conn)
+            clientes_tcp[usuario] = conn
             usuarios_conectados[addr] = (usuario, conn)
             print(f"[TCP] {usuario} conectado desde {addr}")
-            broadcast(f"{usuario} se ha conectado (TCP)", 'tcp', conn)
-            
+            logging.info(f"{usuario} conectado desde {addr}")
+            broadcast(f"{usuario} se ha conectado", conn)
+
+            # Manejo de mensajes
             while True:
                 data = conn.recv(BUFFER_SIZE)
                 if not data or data.decode().strip().lower() == 'salir':
                     break
-                manejar_mensaje_tcp(data.decode().strip(), addr)
+                mensaje = data.decode().strip()
+                manejar_mensaje_tcp(mensaje, usuario, conn)
+                logging.info(f"{usuario} envió: {mensaje}")
+
         else:
             conn.sendall(b"Autenticacion fallida\n")
+
     except ConnectionResetError:
-        print(f"[TCP] {addr} cerro la conexion abruptamente")
+        print(f"[TCP] {addr} cerró la conexión abruptamente")
     finally:
         if addr in usuarios_conectados:
             usuario = usuarios_conectados[addr][0]
-            broadcast(f"{usuario} se ha desconectado", 'tcp')
+            broadcast(f"{usuario} se ha desconectado")
             print(f"[TCP] {usuario} desconectado")
+            logging.info(f"{usuario} se desconectó")
             del usuarios_conectados[addr]
-        if conn in clientes_tcp:
-            clientes_tcp.remove(conn)
+        if usuario in clientes_tcp:
+            del clientes_tcp[usuario]
         conn.close()
-
-def servidor_udp(usuarios_validos):
-    """Inicia el servidor UDP"""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind((HOST, UDP_PORT))
-        print(f"[UDP] Servidor escuchando en {HOST}:{UDP_PORT}")
-        
-        while True:
-            data, addr = s.recvfrom(BUFFER_SIZE)
-            
-            if addr not in clientes_udp:
-                # Autenticacion UDP
-                credenciales = data.decode().strip().split(':', 1)
-                if len(credenciales) == 2:
-                    usuario, clave = credenciales
-                    if usuario in usuarios_validos and usuarios_validos[usuario] == clave:
-                        s.sendto(b"Autenticado correctamente", addr)
-                        clientes_udp.append(addr)
-                        usuarios_conectados[addr] = (usuario, addr)
-                        print(f"[UDP] {usuario} conectado desde {addr}")
-                        broadcast(f"{usuario} se ha conectado (UDP)", 'udp', addr)
-                    else:
-                        s.sendto(b"Autenticacion fallida", addr)
-                else:
-                    s.sendto(b"Formato incorrecto. Usa usuario:clave", addr)
-            else:
-                # Manejo de mensajes UDP
-                usuario = usuarios_conectados.get(addr, ["Anonimo"])[0]
-                mensaje = data.decode().strip()
-                
-                if mensaje.lower() == 'salir':
-                    print(f"[UDP] {usuario} se desconecto")
-                    clientes_udp.remove(addr)
-                    if addr in usuarios_conectados:
-                        broadcast(f"{usuario} se ha desconectado", 'udp')
-                        del usuarios_conectados[addr]
-                elif mensaje.startswith('@'):  # Privado UDP
-                    partes = mensaje.split(maxsplit=1)
-                    if len(partes) > 1:
-                        destino, msg = partes
-                        destino = destino[1:]
-                        if enviar_privado(f"{usuario} te dice: {msg}", destino):
-                            print(f"[UDP] {usuario} -> {destino}: {msg}")
-                else:  # Publico UDP
-                    print(f"[UDP] {usuario}: {mensaje}")
-                    broadcast(f"{usuario}: {mensaje}", 'udp', addr)
 
 def input_servidor():
     """Permite al servidor enviar mensajes globales/privados"""
     print("\nModo servidor activo. Comandos:")
-    print("- [tcp/udp/all] mensaje (broadcast)")
+    print("- [tcp/all] mensaje (broadcast)")
     print("- @usuario mensaje (privado)")
     print("- shutdown (apagar servidor)")
     
@@ -185,7 +157,6 @@ def input_servidor():
             if entrada.lower() == 'shutdown':
                 print("Cerrando servidor...")
                 broadcast("El servidor se cierra. Desconectando...", 'tcp')
-                broadcast("El servidor se cierra. Desconectando...", 'udp')
                 os._exit(0)
                 
             if entrada.startswith('@'):  # Privado desde servidor
@@ -200,21 +171,16 @@ def input_servidor():
             else:  # Broadcast
                 partes = entrada.split(maxsplit=1)
                 if len(partes) < 2:
-                    print("Formato: [tcp/udp/all] mensaje")
+                    print("Formato: [tcp/all] mensaje")
                     continue
                     
                 destino, mensaje = partes
                 destino = destino.lower()
                 
-                if destino == 'tcp':
-                    broadcast(mensaje, 'tcp')
-                elif destino == 'udp':
-                    broadcast(mensaje, 'udp')
-                elif destino == 'all':
-                    broadcast(mensaje, 'tcp')
-                    broadcast(mensaje, 'udp')
+                if destino == 'tcp' or destino == "all":
+                    broadcast(mensaje)
                 else:
-                    print("Destino invalido. Usa: tcp, udp o all")
+                    print("Destino invalido. Usa: tcp o all")
                     
         except Exception as e:
             print(f"Error: {e}")
@@ -225,7 +191,6 @@ if __name__ == "__main__":
     if usuarios:
         print(f"Usuarios cargados: {len(usuarios)}")
         threading.Thread(target=servidor_tcp, args=(usuarios,), daemon=True).start()
-        threading.Thread(target=servidor_udp, args=(usuarios,), daemon=True).start()
         threading.Thread(target=input_servidor, daemon=True).start()
         
         try:
