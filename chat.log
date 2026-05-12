@@ -4,3 +4,18 @@ INFO:root:joel envió: hola
 INFO:root:franco envió: hola
 INFO:root:franco envió: @joel hola
 INFO:root:joel envió: @franco hola
+INFO:root:roberto conectado desde ('127.0.0.1', 57828)
+INFO:root:franco conectado desde ('127.0.0.1', 57824)
+INFO:root:franco envió: hola
+INFO:root:roberto envió: que tal
+INFO:root:joel conectado desde ('127.0.0.1', 64573)
+INFO:root:franco conectado desde ('127.0.0.1', 64575)
+INFO:root:joel envió: hola
+INFO:root:franco envió: que tal
+INFO:root:franco conectado desde ('127.0.0.1', 55212)
+INFO:root:joel conectado desde ('127.0.0.1', 53967)
+INFO:root:franco envió: hola
+INFO:root:franco conectado desde ('127.0.0.1', 55832)
+INFO:root:joel conectado desde ('127.0.0.1', 55831)
+INFO:root:joel envió: hola
+INFO:root:franco envió: que tal

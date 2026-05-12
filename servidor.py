@@ -4,15 +4,23 @@ import os
 from datetime import datetime
 import hashlib
 import logging
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization, hashes    
 
 # Configuración del log
 logging.basicConfig(filename="chat.log", level=logging.INFO)
 
 # Configuracion
-HOST = '0.0.0.0'
+HOST = '127.0.0.1'
 TCP_PORT = 50000
 BUFFER_SIZE = 1024
 MAX_CONEXIONES = 5
+private_key = rsa.generate_private_key(
+    public_exponent=65537,
+    key_size=2048
+)
+
+public_key = private_key.public_key()
 
 # Estructura para clientes
 clientes_tcp = {}  # {usuario: conn}
@@ -40,6 +48,15 @@ def cargar_usuarios():
         print("[ERROR] Archivo usuarios.txt no encontrado")
     return usuarios
 
+def recibir_completo(conn, size):
+    data = b''
+    while len(data) < size:
+        paquete = conn.recv(size - len(data))
+        if not paquete:
+            return None
+        data += paquete
+    return data
+
 def broadcast(mensaje, origen=None):
     """Envía un mensaje a todos los clientes TCP"""
     for usuario, conn in list(clientes_tcp.items()):
@@ -56,9 +73,7 @@ def enviar_privado(mensaje, usuario_destino):
             try:
                 if isinstance(sock, socket.socket):  # TCP
                     sock.sendall(f"PRIVADO: {mensaje}\n".encode())
-                    return True 
-            except Exception as e:
-                print(f"[ERROR] No se pudo enviar mensaje privado: {e}")
+            except:
                 return False
     return False
 
@@ -91,11 +106,43 @@ def servidor_tcp(usuarios_validos):
 def autenticar_tcp(conn, addr, usuarios_validos):
     """Autentica clientes TCP"""
     try:
+        #Enviar clave pública al cliente
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+        conn.sendall(public_pem)
         conn.sendall(b"Usuario: ")
-        usuario = conn.recv(BUFFER_SIZE).decode().strip()
-        conn.sendall(b"Clave: ")
-        clave = conn.recv(BUFFER_SIZE).decode().strip()
 
+        # Recibir usuario cifrado
+        data_usuario = recibir_completo(conn, 256)
+        if data_usuario is None:
+            conn.close()
+            return
+        usuario = private_key.decrypt(
+            data_usuario,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        ).decode().strip()
+
+        conn.sendall(b"Clave: ")
+
+        # Recibir contraseña cifrada
+        data_clave = recibir_completo(conn, 256)
+        if data_clave is None:
+            conn.close()
+            return
+        clave = private_key.decrypt(
+            data_clave,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        ).decode().strip()
         # Validar credenciales con hash
         if usuario in usuarios_validos and usuarios_validos[usuario] == clave:
             # Verificar usuario único
@@ -120,10 +167,28 @@ def autenticar_tcp(conn, addr, usuarios_validos):
 
             # Manejo de mensajes
             while True:
-                data = conn.recv(BUFFER_SIZE)
-                if not data or data.decode().strip().lower() == 'salir':
+                data = recibir_completo(conn, 256)
+
+                if not data:
                     break
-                mensaje = data.decode().strip()
+                #Impresión de datos crudos para comprobar el cifrado
+                print(f"\n[DEBUG RAW HEX]: {data.hex()}\n")
+
+                try:
+                    mensaje = private_key.decrypt(
+                        data,
+                        padding.OAEP(
+                            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                            algorithm=hashes.SHA256(),
+                            label=None
+                        )
+                    ).decode().strip()
+                except Exception as e:
+                    print(f"[ERROR DESCIFRADO] {e}")
+                    continue
+
+                if mensaje.lower() == 'salir':
+                        break
                 manejar_mensaje_tcp(mensaje, usuario, conn)
                 logging.info(f"{usuario} envió: {mensaje}")
 

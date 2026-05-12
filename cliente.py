@@ -2,6 +2,8 @@ import socket
 import threading
 import sys
 import hashlib
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 
 # Configuración
 HOST = "127.0.0.1"  # Cambiar por IP del servidor
@@ -33,18 +35,42 @@ class ClienteChat:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
                 s.connect((HOST, TCP_PORT))
+                public_pem = b''
+                while b"-----END PUBLIC KEY-----" not in public_pem:
+                    public_pem += s.recv(1024)
+                public_key = serialization.load_pem_public_key(public_pem)
                 self.tcp_active = True
                 print("Conexión TCP establecida")
 
                 # Autenticación
                 print(s.recv(BUFFER_SIZE).decode(), end='')
                 self.usuario_actual = input().strip()
-                s.sendall(self.usuario_actual.encode())
+
+                # Enviar usuario cifrado
+                encrypted_user = public_key.encrypt(
+                    self.usuario_actual.encode(),
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None
+                    )
+                )
+                s.sendall(encrypted_user)
 
                 print(s.recv(BUFFER_SIZE).decode(), end='')
                 clave = input().strip()
                 clave_hasheada = self.hash_password(clave)
-                s.sendall(clave_hasheada.encode())
+
+                # Enviar contraseña cifrada
+                encrypted_pass = public_key.encrypt(
+                    clave_hasheada.encode(),
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None
+                    )
+                )
+                s.sendall(encrypted_pass)
 
                 respuesta = s.recv(BUFFER_SIZE).decode()
                 print(respuesta)
@@ -55,10 +81,27 @@ class ClienteChat:
                     while self.tcp_active:
                         msg = input(f"{self.usuario_actual}> ")
                         if msg.lower() == 'salir':
-                            s.sendall(b"salir")
+                            encrypted = public_key.encrypt(
+                                msg.encode(),
+                                padding.OAEP(
+                                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                    algorithm=hashes.SHA256(),
+                                    label=None
+                                )
+                            )
+                            s.sendall(encrypted)
                             self.tcp_active = False
                             break
-                        s.sendall(msg.encode())
+                        encrypted = public_key.encrypt(
+                            msg.encode(),
+                            padding.OAEP(
+                                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                algorithm=hashes.SHA256(),
+                                label=None
+                            )
+                        )
+
+                        s.sendall(encrypted)
 
             except ConnectionRefusedError:
                 print("[Error] Servidor no disponible")
