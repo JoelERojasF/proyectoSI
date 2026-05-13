@@ -12,7 +12,7 @@ from validaciones import (sanitizar_usuario, sanitizar_mensaje, validar_usuario,
 logging.basicConfig(filename="chat.log", level=logging.INFO)
 
 # Configuracion
-HOST = '127.0.0.1'
+HOST = '0.0.0.0'
 TCP_PORT = 50000
 BUFFER_SIZE = 1024
 MAX_CONEXIONES = 5
@@ -179,29 +179,27 @@ def autenticar_tcp(conn, addr, usuarios_validos):
             # Manejo de mensajes
             while True:
                 data = recibir_completo(conn, 256)
-
                 if not data:
                     break
-                #Impresión de datos crudos para comprobar el cifrado
-                print(f"\n[DEBUG RAW HEX]: {data.hex()}\n")
 
                 try:
                     mensaje_raw = descifrar(data)
+
+                    if mensaje_raw.lower() == 'salir':  # ← ahora está dentro del try
+                        break
+
+                    mensaje = sanitizar_mensaje(mensaje_raw)
+                    valido, motivo = validar_mensaje(mensaje)
+                    if not valido:
+                        conn.sendall(f"Mensaje invalido: {motivo}\n".encode())
+                        continue
+
+                    manejar_mensaje_tcp(mensaje, usuario, conn)
+                    logging.info(f"{usuario} envió: {mensaje}")
+
                 except Exception as e:
                     print(f"[ERROR DESCIFRADO] {e}")
                     continue
-
-                if mensaje.lower() == 'salir':
-                        break
-                
-                mensaje = sanitizar_mensaje(mensaje_raw)
-                valido, motivo = validar_mensaje(mensaje)
-                if not valido:
-                    conn.sendall(f"Mensaje inválido: {motivo}\n".encode())
-                    continue
-
-                manejar_mensaje_tcp(mensaje, usuario, conn)
-                logging.info(f"{usuario} envió: {mensaje}")
 
         else:
             conn.sendall(b"Autenticacion fallida\n")

@@ -19,3 +19,23 @@ INFO:root:franco conectado desde ('127.0.0.1', 55832)
 INFO:root:joel conectado desde ('127.0.0.1', 55831)
 INFO:root:joel envió: hola
 INFO:root:franco envió: que tal
+INFO:root:joel conectado desde ('127.0.0.1', 58274)
+INFO:root:franco conectado desde ('192.168.100.13', 49326)
+INFO:root:joel conectado desde ('127.0.0.1', 61531)
+INFO:root:joel se desconectó
+INFO:root:joel conectado desde ('127.0.0.1', 61540)
+INFO:root:joel se desconectó
+INFO:root:franco se desconectó
+INFO:root:franco conectado desde ('192.168.100.13', 49335)
+INFO:root:joel conectado desde ('127.0.0.1', 49556)
+INFO:root:joel envió: hola
+INFO:root:franco envió: hola
+INFO:root:franco envió: @joel
+INFO:root:franco envió: @joel hola
+INFO:root:joel envió: @franco hola
+INFO:root:joel se desconectó
+INFO:root:jose conectado desde ('192.168.100.13', 49357)
+INFO:root:juan conectado desde ('192.168.100.13', 49360)
+INFO:root:franco conectado desde ('192.168.100.13', 49361)
+INFO:root:joel conectado desde ('127.0.0.1', 52274)
+INFO:root:roberto conectado desde ('127.0.0.1', 52283)
